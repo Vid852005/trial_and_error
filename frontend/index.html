@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trial and Error</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+  <style>
+    :root {
+      --bg: #09090b; --panel: #18181b; --active: #27272a;
+      --border: #3f3f46; --text: #e4e4e7; --muted: #a1a1aa;
+      --blue: #3b82f6; --blue2: #2563eb; --red: #ef4444; --green: #22c55e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+
+    /* layout */
+    #sidebar { width: 220px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+    #main    { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #editor-wrap  { flex: 2; position: relative; min-height: 0; border-bottom: 1px solid var(--border); }
+    #term-wrap    { flex: 1; min-height: 160px; background: #000; display: flex; flex-direction: column; padding: 8px; }
+    #terminal     { flex: 1; min-height: 0; }
+
+    /* brand */
+    .brand { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .brand-title    { font-weight: 700; font-size: 15px; color: var(--blue); }
+    .brand-sub      { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-top: 2px; }
+
+    .sidebar-bar { padding: 9px 14px; font-size: 10px; font-weight: 600; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+    .ico-btn { background: none; border: 1px solid var(--border); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 10px; padding: 2px 6px; line-height: 1.6; transition: background .12s; }
+    .ico-btn:hover { background: var(--active); }
+    .plus-btn { background: var(--blue); color: #fff; border: none; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; transition: background .12s; }
+    .plus-btn:hover { background: var(--blue2); }
+
+    #file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+    .fi { padding: 6px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); transition: background .1s, color .1s; gap: 6px; }
+    .fi:hover { background: var(--active); color: var(--text); }
+    .fi.active { background: var(--blue); color: #fff; }
+    .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fi-dl { background: none; border: none; color: inherit; cursor: pointer; opacity: 0; padding: 2px; display: inline-flex; transition: opacity .1s; }
+    .fi:hover .fi-dl, .fi.active .fi-dl { opacity: .65; }
+    .fi-dl:hover { opacity: 1 !important; }
+
+    #toolbar { padding: 6px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .btn { background: var(--active); color: var(--text); border: 1px solid var(--border); padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: 'Inter', sans-serif; transition: background .12s; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: var(--border); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-run { background: var(--blue); color: #fff; border: none; }
+    .btn-run:hover:not(:disabled) { background: var(--blue2); }
+    .btn-run.compiling { background: #78350f; }
+    .btn-run.running   { background: #14532d; }
+    #status-txt { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+    #loading { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; transition: opacity .3s; }
+    .spin { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .85s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 2000; }
+    .modal { background: var(--panel); padding: 20px; border: 1px solid var(--border); border-radius: 6px; width: 300px; display: flex; flex-direction: column; gap: 12px; }
+    .modal-title { font-weight: 600; font-size: 14px; }
+    .modal-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 13px; outline: none; width: 100%; }
+    .modal-input:focus { border-color: var(--blue); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .term-hdr { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; letter-spacing: .5px; text-transform: uppercase; padding-bottom: 6px; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spin"></div>
+  <div style="font-size:13px;color:var(--muted)">Allocating sandbox…</div>
+</div>
+
+<div id="modal-bg">
+  <div class="modal">
+    <div class="modal-title">New File</div>
+    <input id="fname" class="modal-input" placeholder="e.g. scanner.l or main.c" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-run" onclick="confirmNew()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="sidebar">
+  <div class="brand">
+    <div class="brand-title">Trial and Error</div>
+    <div class="brand-sub">Lex &amp; C Online Compiler</div>
+  </div>
+  <div class="sidebar-bar">
+    Files
+    <div style="display:flex;gap:5px;align-items:center">
+      <button class="ico-btn" onclick="dlZip()">ZIP</button>
+      <button class="plus-btn" onclick="openModal()">+</button>
+    </div>
+  </div>
+  <div id="file-list"></div>
+</div>
+
+<div id="main">
+  <div id="toolbar">
+    <button id="run-btn" class="btn btn-run" onclick="runFile()">&#9654; Run</button>
+    <span id="status-txt"></span>
+  </div>
+  <div id="editor-wrap"></div>
+  <div id="term-wrap">
+    <div class="term-hdr">
+      <span>&#9658; Terminal</span>
+      <span id="term-status"></span>
+    </div>
+    <div id="terminal"></div>
+  </div>
+</div>
+
+<script>
+let sid        = null;
+let editor     = null;
+let term       = null;         
+let runSocket       = null;    
+  let inputDisposable = null;    
+let currentFile = null;
+let saveTimer   = null;
+let busy        = false;       
+async function boot() {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch("/api/session", { method: "POST", signal: ctrl.signal });
+    clearTimeout(t);
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error);
+    sid = d.sid;
+
+    const el = document.getElementById("loading");
+    el.style.opacity = "0";
+    setTimeout(() => el.style.display = "none", 300);
+
+    await initEditor();
+    await initTerminal();
+    await refreshFiles();
+  } catch (e) {
+    document.getElementById("loading").innerHTML =
+      `<div style="color:var(--red);font-size:14px;margin-bottom:8px">Failed to start sandbox</div>` +
+      `<div style="color:var(--muted);font-size:12px;max-width:300px;text-align:center">${e.message}</div>` +
+      `<button class="btn" style="margin-top:16px" onclick="location.reload()">Retry</button>`;
+  }
+}
+
+
+function initEditor() {
+  return new Promise(resolve => {
+    require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs" } });
+    require(["vs/editor/editor.main"], () => {
+      editor = monaco.editor.create(document.getElementById("editor-wrap"), {
+        theme: "vs-dark", language: "c",
+        automaticLayout: true,
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 14,
+        minimap: { enabled: false }, scrollBeyondLastLine: false, tabSize: 4
+      });
+      editor.onDidChangeModelContent(() => {
+        if (!currentFile) return;
+        const f = currentFile;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => silentSave(f, editor.getValue()), 800);
+      });
+      resolve();
+    });
+  });
+}
+
+async function initTerminal() {
+  const { Terminal } = await import("https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm");
+  const { FitAddon } = await import("https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/+esm");
+
+  term = new Terminal({
+    theme: { background: "#000", foreground: "#e4e4e7", cursor: "#3b82f6" },
+    fontFamily: "'JetBrains Mono', monospace", fontSize: 13,
+    cursorBlink: true, convertEol: true, scrollback: 3000
+  });
+
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("terminal"));
+  const doFit = () => { try { fit.fit(); } catch {} };
+  doFit();
+  new ResizeObserver(doFit).observe(document.getElementById("term-wrap"));
+  window.addEventListener("resize", doFit);
+
+  termWrite("\x1b[90mSandbox ready. Open a .l or .c file and click Run.\x1b[0m\r\n");
+}
+
+async function runFile() {
+  if (!currentFile) { alert("Open a .l or .c file first."); return; }
+  if (busy) return;
+
+  const f = currentFile;
+  if (!f.endsWith(".l") && !f.endsWith(".c")) {
+    alert("Only .l (Lex) and .c (C) files can be run.");
+    return;
+  }
+
+  killRun();
+
+  setBusy(true, "compiling");
+  termClear();
+  termWrite(`\x1b[36mCompiling ${f}...\x1b[0m\r\n`);
+
+  if (editor) await silentSave(f, editor.getValue());
+
+  let compileResult;
+  try {
+    const r = await fetch("/api/compile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sid, file: f })
+    });
+    compileResult = await r.json();
+  } catch (e) {
+    termWrite(`\x1b[31mNetwork error: ${e.message}\x1b[0m\r\n`);
+    setBusy(false, "");
+    return;
+  }
+  if (compileResult.output) {
+    termWrite(compileResult.output.replace(/\n/g, "\r\n") + "\r\n");
+  }
+
+  if (!compileResult.success) {
+    termWrite(`\x1b[31mCompilation failed.\x1b[0m\r\n`);
+    setBusy(false, "");
+    return;
+  }
+
+  termWrite(`\x1b[32mCompiled OK.\x1b[0m Running — type input below, press Ctrl\u2011D when done.\r\n`);
+  termWrite(`\x1b[90m${"─".repeat(48)}\x1b[0m\r\n`);
+
+  setBusy(true, "running");
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  runSocket = new WebSocket(`${proto}//${location.host}/run?sid=${sid}`);
+  if (inputDisposable) { inputDisposable.dispose(); inputDisposable = null; }
+  inputDisposable = term.onData(data => {
+    if (runSocket && runSocket.readyState === WebSocket.OPEN) {
+      runSocket.send(data);
+    }
+  });
+
+  runSocket.onopen = () => {
+    setTermStatus("running");
+  };
+
+  runSocket.onmessage = e => {
+    termWrite(typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data));
+  };
+
+  runSocket.onclose = () => {
+    setTermStatus("");
+    setBusy(false, "");
+    termWrite(`\x1b[90m${"─".repeat(48)}\x1b[0m\r\n`);
+  };
+
+  runSocket.onerror = () => {
+    termWrite(`\x1b[31m[WebSocket error]\x1b[0m\r\n`);
+    setBusy(false, "");
+  };
+}
+
+function killRun() {
+  if (inputDisposable) { inputDisposable.dispose(); inputDisposable = null; }
+  if (runSocket) {
+    try { runSocket.close(); } catch {}
+    runSocket = null;
+  }
+}
+
+async function refreshFiles() {
+  try {
+    const r = await fetch(`/api/fs/list?sid=${sid}`);
+    const d = await r.json();
+    if (!d.success) return;
+
+    const list = document.getElementById("file-list");
+    list.innerHTML = "";
+    d.files.forEach(f => {
+      const row = document.createElement("div");
+      row.className = "fi" + (f === currentFile ? " active" : "");
+      row.onclick = () => openFile(f);
+
+      const nm = document.createElement("span");
+      nm.className = "fi-name"; nm.textContent = f; nm.title = f;
+
+      const dl = document.createElement("button");
+      dl.className = "fi-dl"; dl.title = "Download";
+      dl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+      dl.onclick = e => { e.stopPropagation(); dlFile(f); };
+
+      const rn = document.createElement("button");
+      rn.className = "fi-dl"; rn.title = "Rename";
+      rn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+      rn.onclick = e => { e.stopPropagation(); renameFile(f); };
+
+      const del = document.createElement("button");
+      del.className = "fi-dl"; del.title = "Delete";
+      del.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+      del.onclick = e => { e.stopPropagation(); deleteFile(f); };
+
+      row.appendChild(nm); row.appendChild(dl); row.appendChild(rn); row.appendChild(del);
+      list.appendChild(row);
+    });
+
+    if (!currentFile && d.files.includes("scanner.l")) openFile("scanner.l");
+  } catch {}
+}
+
+async function openFile(f) {
+  if (f === currentFile) return;
+  if (currentFile && editor) { clearTimeout(saveTimer); await silentSave(currentFile, editor.getValue()); }
+  currentFile = f;
+  refreshFiles();
+  try {
+    const r = await fetch(`/api/fs/read?sid=${sid}&file=${encodeURIComponent(f)}`);
+    const d = await r.json();
+    if (!d.success || !editor) return;
+    editor.setValue(d.content);
+    const lang =
+      f.endsWith(".c") || f.endsWith(".h") ? "c" :
+      f.endsWith(".cpp") || f.endsWith(".cc") ? "cpp" :
+      f.endsWith(".l") || f.endsWith(".y") ? "c" :
+      f.endsWith(".js") ? "javascript" :
+      f.endsWith(".json") ? "json" : "plaintext";
+    monaco.editor.setModelLanguage(editor.getModel(), lang);
+  } catch {}
+}
+
+async function silentSave(f, content) {
+  try {
+    await fetch("/api/fs/write", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sid, file: f, content })
+    });
+  } catch {}
+}
+
+
+function openModal() {
+  document.getElementById("modal-bg").style.display = "flex";
+  const inp = document.getElementById("fname");
+  inp.value = ""; inp.focus();
+  inp.onkeydown = e => { if (e.key === "Enter") confirmNew(); if (e.key === "Escape") closeModal(); };
+}
+function closeModal() { document.getElementById("modal-bg").style.display = "none"; }
+document.getElementById("modal-bg").addEventListener("click", e => { if (e.target === e.currentTarget) closeModal(); });
+
+async function confirmNew() {
+  const name = document.getElementById("fname").value.trim();
+  if (!name) return;
+  closeModal();
+  if (currentFile && editor) { clearTimeout(saveTimer); await silentSave(currentFile, editor.getValue()); }
+  await silentSave(name, "");
+  await refreshFiles();
+  await openFile(name);
+}
+
+function dlFile(f) {
+  const a = document.createElement("a");
+  a.href = `/api/fs/download?sid=${sid}&file=${encodeURIComponent(f)}`;
+  a.download = f; a.click();
+}
+async function renameFile(oldName) {
+  const newName = prompt(`Rename "${oldName}" to:`, oldName);
+  if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+  const r = await fetch("/api/fs/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sid, oldName, newName: newName.trim() })
+  });
+  const d = await r.json();
+  if (!d.success) { alert("Rename failed: " + d.error); return; }
+  if (currentFile === oldName) currentFile = newName.trim();
+  await refreshFiles();
+  if (currentFile === newName.trim()) await openFile(newName.trim());
+}
+
+async function deleteFile(file) {
+  if (!confirm(`Delete "${file}"? This cannot be undone.`)) return;
+  const r = await fetch("/api/fs/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sid, file })
+  });
+  const d = await r.json();
+  if (!d.success) { alert("Delete failed: " + d.error); return; }
+  if (currentFile === file) {
+    currentFile = null;
+    if (editor) editor.setValue("");
+  }
+  await refreshFiles();
+}
+
+function dlZip() {
+  const a = document.createElement("a");
+  a.href = `/api/fs/download-all?sid=${sid}`;
+  a.download = "project.zip";
+  a.click();
+}
+
+function termWrite(txt) { if (term) term.write(txt); }
+function termClear()    { if (term) term.clear(); }
+function setTermStatus(s) {
+  const el = document.getElementById("term-status");
+  if (el) el.textContent = s === "running" ? "● running" : s === "compiling" ? "● compiling" : "";
+}
+function setStatus(s) {
+  const el = document.getElementById("status-txt");
+  if (el) el.textContent = s;
+}
+function setBusy(val, state) {
+  busy = val;
+  const btn = document.getElementById("run-btn");
+  btn.disabled = val;
+  btn.className = "btn btn-run" + (state === "compiling" ? " compiling" : state === "running" ? " running" : "");
+  btn.textContent = state === "compiling" ? "Compiling…" : state === "running" ? "Running…" : "▶ Run";
+  setTermStatus(state);
+}
+
+boot();
+</script>
+</body>
+</html>
